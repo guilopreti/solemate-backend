@@ -1,17 +1,27 @@
 import { Router } from "express";
-import { v4 as uuidv4 } from "uuid";
-import { listarEntidades, buscarEntidade, criarEntidade, atualizarEntidade, deletarEntidade } from "../services/tableService";
+import { supabase } from "../config/supabase";
 
 const router = Router();
-const TABLE = process.env.TABLE_CLIENTES!;
-const TABLE_PEDIDOS = process.env.TABLE_PEDIDOS!;
-const PARTITION = "cliente";
+
+function mapper(dbItem: any) {
+  if (!dbItem) return dbItem;
+  return {
+    partitionKey: "cliente",
+    rowKey: dbItem.id,
+    id: dbItem.id,
+    nome: dbItem.nome,
+    email: dbItem.email,
+    telefone: dbItem.telefone,
+    endereco: dbItem.endereco
+  };
+}
 
 // GET /api/clientes
 router.get("/", async (req, res) => {
   try {
-    const clientes = await listarEntidades(TABLE, PARTITION);
-    res.json(clientes);
+    const { data, error } = await supabase.from("clientes").select("*");
+    if (error) throw error;
+    res.json(data ? data.map(mapper) : []);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -19,9 +29,11 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     const { nome, email, telefone, endereco } = req.body;
-    const rowKey = uuidv4();
-    await criarEntidade(TABLE, { partitionKey: PARTITION, rowKey, nome, email, telefone, endereco });
-    res.status(201).json({ id: rowKey, nome, email, telefone, endereco });
+    const { data: insertedData, error } = await supabase.from("clientes").insert({
+      nome, email, telefone, endereco
+    }).select().single();
+    if (error) throw error;
+    res.status(201).json(mapper(insertedData));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -29,7 +41,16 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    await atualizarEntidade(TABLE, { partitionKey: PARTITION, rowKey: id, ...req.body });
+    const { nome, email, telefone, endereco } = req.body;
+    
+    const updatePayload: any = {};
+    if (nome !== undefined) updatePayload.nome = nome;
+    if (email !== undefined) updatePayload.email = email;
+    if (telefone !== undefined) updatePayload.telefone = telefone;
+    if (endereco !== undefined) updatePayload.endereco = endereco;
+
+    const { error } = await supabase.from("clientes").update(updatePayload).eq("id", id);
+    if (error) throw error;
     res.json({ updated: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -38,20 +59,11 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
-    // Buscar todos os pedidos do sistema para encontrar os do cliente
-    const todosPedidos: any[] = await listarEntidades(TABLE_PEDIDOS, "pedido");
-    const pedidosCliente = todosPedidos.filter(p => p.clienteId === id);
-
-    // Deletar os pedidos do cliente um por um
-    for (const pedido of pedidosCliente) {
-      await deletarEntidade(TABLE_PEDIDOS, "pedido", pedido.rowKey);
-    }
-
-    // Por fim, deletar o cliente
-    await deletarEntidade(TABLE, PARTITION, id);
+    // Postgres ON DELETE CASCADE já lida com exclusão dos pedidos vinculados
+    const { error } = await supabase.from("clientes").delete().eq("id", id);
+    if (error) throw error;
     
-    res.json({ deleted: true, pedidosDeletados: pedidosCliente.length });
+    res.json({ deleted: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -59,9 +71,26 @@ router.delete("/:id", async (req, res) => {
 router.get("/:id/pedidos", async (req, res) => {
   try {
     const { id } = req.params;
-    const todosPedidos: any[] = await listarEntidades(TABLE_PEDIDOS, "pedido");
-    const pedidosCliente = todosPedidos.filter(p => p.clienteId === id);
-    res.json(pedidosCliente);
+    const { data, error } = await supabase.from("pedidos").select("*").eq("cliente_id", id);
+    if (error) throw error;
+    
+    const mapped = data?.map(dbItem => ({
+      partitionKey: "pedido",
+      rowKey: dbItem.id,
+      id: dbItem.id,
+      clienteId: dbItem.cliente_id,
+      clienteNome: dbItem.cliente_nome,
+      produtoId: dbItem.produto_id,
+      produtoNome: dbItem.produto_nome,
+      quantidade: dbItem.quantidade,
+      valorUnitario: parseFloat(dbItem.valor_unitario),
+      valorTotal: parseFloat(dbItem.valor_total),
+      metodoPagamento: dbItem.metodo_pagamento,
+      metodoEntrega: dbItem.metodo_entrega,
+      status: dbItem.status,
+      dataPedido: dbItem.data_pedido
+    })) || [];
+    res.json(mapped);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

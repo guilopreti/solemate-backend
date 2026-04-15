@@ -1,24 +1,42 @@
-import { Router, Request, Response, NextFunction } from "express";
+import { Router, Request, Response } from "express";
 import multer from "multer";
-import { v4 as uuidv4 } from "uuid";
-import { listarEntidades, buscarEntidade, criarEntidade, atualizarEntidade, deletarEntidade } from "../services/tableService";
+import { supabase } from "../config/supabase";
 import { uploadImagem, deleteImagem } from "../services/blobService";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
-const TABLE = process.env.TABLE_PRODUTOS!;
-const PARTITION = "produto";
+
+function mapper(dbItem: any) {
+  if (!dbItem) return dbItem;
+  return {
+    partitionKey: "produto",
+    rowKey: dbItem.id,
+    id: dbItem.id,
+    marca: dbItem.marca,
+    modelo: dbItem.modelo,
+    valor: parseFloat(dbItem.valor),
+    quantidade: dbItem.quantidade,
+    imageUrl: dbItem.image_url,
+    nomeArquivo: dbItem.nome_arquivo
+  };
+}
 
 // GET /api/produtos?marca=&modelo=&valorMin=&valorMax=
 router.get("/", async (req, res) => {
   try {
-    let produtos: any[] = await listarEntidades(TABLE, PARTITION);
+    let query = supabase.from("produtos").select("*");
+    
     const { marca, modelo, valorMin, valorMax } = req.query;
-    if (marca) produtos = produtos.filter(p => p.marca?.toLowerCase().includes((marca as string).toLowerCase()));
-    if (modelo) produtos = produtos.filter(p => p.modelo?.toLowerCase().includes((modelo as string).toLowerCase()));
-    if (valorMin) produtos = produtos.filter(p => p.valor >= parseFloat(valorMin as string));
-    if (valorMax) produtos = produtos.filter(p => p.valor <= parseFloat(valorMax as string));
-    res.json(produtos);
+    
+    if (marca) query = query.ilike("marca", `%${marca}%`);
+    if (modelo) query = query.ilike("modelo", `%${modelo}%`);
+    if (valorMin) query = query.gte("valor", parseFloat(valorMin as string));
+    if (valorMax) query = query.lte("valor", parseFloat(valorMax as string));
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    res.json(data ? data.map(mapper) : []);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -30,25 +48,39 @@ router.post("/", upload.single("foto") as any, async (req: Request, res: Respons
     if (!file) return res.status(400).json({ error: "Imagem obrigatória" }) as any;
 
     const { url: imageUrl, nomeArquivo } = await uploadImagem(file.buffer, file.mimetype, file.originalname);
-    const rowKey = uuidv4();
 
-    await criarEntidade(TABLE, {
-      partitionKey: PARTITION, rowKey,
-      marca, modelo,
+    const { data: insertedData, error } = await supabase.from("produtos").insert({
+      marca,
+      modelo,
       valor: parseFloat(valor),
       quantidade: parseInt(quantidade),
-      imageUrl, nomeArquivo,
-    });
+      image_url: imageUrl,
+      nome_arquivo: nomeArquivo
+    }).select().single();
 
-    res.status(201).json({ id: rowKey, marca, modelo, valor, quantidade, imageUrl });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    if (error) throw error;
+
+    res.status(201).json(mapper(insertedData));
+  } catch (e: any) { 
+    res.status(500).json({ error: e.message }); 
+  }
 });
 
 // PUT /api/produtos/:id
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    await atualizarEntidade(TABLE, { partitionKey: PARTITION, rowKey: id, ...req.body });
+    const { marca, modelo, valor, quantidade } = req.body;
+    
+    const updatePayload: any = {};
+    if (marca !== undefined) updatePayload.marca = marca;
+    if (modelo !== undefined) updatePayload.modelo = modelo;
+    if (valor !== undefined) updatePayload.valor = parseFloat(valor);
+    if (quantidade !== undefined) updatePayload.quantidade = parseInt(quantidade);
+
+    const { error } = await supabase.from("produtos").update(updatePayload).eq("id", id);
+    if (error) throw error;
+
     res.json({ updated: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -57,9 +89,17 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const produto: any = await buscarEntidade(TABLE, PARTITION, id);
-    if (produto?.nomeArquivo) await deleteImagem(produto.nomeArquivo);
-    await deletarEntidade(TABLE, PARTITION, id);
+    
+    const { data: produto, error: fetchError } = await supabase.from("produtos").select("nome_arquivo").eq("id", id).single();
+    if (fetchError) throw fetchError;
+
+    if (produto?.nome_arquivo) {
+      await deleteImagem(produto.nome_arquivo);
+    }
+
+    const { error } = await supabase.from("produtos").delete().eq("id", id);
+    if (error) throw error;
+
     res.json({ deleted: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

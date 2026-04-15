@@ -1,6 +1,6 @@
 # 👟 SoleMate — Backend API
 
-API REST backend da loja de tênis **SoleMate**, desenvolvida com **Node.js + Express + TypeScript**, integrada ao **Azure Blob Storage** e **Azure Table Storage**.
+API REST backend da loja de tênis **SoleMate**, desenvolvida com **Node.js + Express + TypeScript**, integrada ao **Supabase (PostgreSQL e Storage)**.
 
 ---
 
@@ -10,8 +10,8 @@ API REST backend da loja de tênis **SoleMate**, desenvolvida com **Node.js + Ex
 |---------------------|-----------------------------------|
 | Node.js + Express   | Servidor HTTP e roteamento        |
 | TypeScript          | Tipagem estática                  |
-| Azure Table Storage | Persistência NoSQL de dados       |
-| Azure Blob Storage  | Armazenamento de imagens          |
+| Supabase PostgreSQL | Persistência de dados relacional  |
+| Supabase Storage    | Armazenamento de imagens          |
 | Multer              | Upload de arquivos multipart      |
 | tsx                 | Hot-reload em desenvolvimento     |
 
@@ -23,10 +23,9 @@ API REST backend da loja de tênis **SoleMate**, desenvolvida com **Node.js + Ex
 backend/
 ├── src/
 │   ├── config/
-│   │   └── azure.ts          # Clientes Azure (Table + Blob)
+│   │   └── supabase.ts       # Cliente do Supabase
 │   ├── services/
-│   │   ├── tableService.ts   # CRUD Table Storage
-│   │   └── blobService.ts    # Upload/delete de imagens
+│   │   └── blobService.ts    # Upload/delete de imagens no Storage
 │   ├── routes/
 │   │   ├── produtos.ts       # Rotas de produtos
 │   │   ├── clientes.ts       # Rotas de clientes
@@ -36,7 +35,8 @@ backend/
 ├── .gitignore
 ├── Dockerfile
 ├── package.json
-└── tsconfig.json
+├── supabase_schema.sql
+├── tsconfig.json
 ```
 
 ---
@@ -71,16 +71,11 @@ O servidor será iniciado em http://localhost:3001 por padrão.
 Crie um arquivo .env na raiz do projeto com as seguintes variáveis:
 
 PORT=3001
-AZURE_STORAGE_CONNECTION_STRING=sua_connection_string_aqui
-AZURE_STORAGE_ACCOUNT_NAME=nome_da_conta
+SUPABASE_URL=https://<SUA_URL_SUPABASE>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<SUA_CHAVE_SERVICE_ROLE>
+SUPABASE_BUCKET=product-images
 
-BLOB_CONTAINER_NAME=nome-do-container
-
-TABLE_PRODUTOS=SuaTabelaProdutos
-TABLE_CLIENTES=SuaTabelaClientes
-TABLE_PEDIDOS=SuaTabelaPedidos
-
-> As tabelas do Azure e o container Blob são criados automaticamente na primeira inicialização, caso não existam.
+> Para inicializar as tabelas, execute o comando SQL fornecido no arquivo `supabase_schema.sql` diretamente no painel do Supabase.
 
 ---
 
@@ -160,7 +155,7 @@ Resposta:
   "modelo": "Air Max 90",
   "valor": "799.90",
   "quantidade": "15",
-  "imageUrl": "https://stocompnuvem2p1.blob.core.windows.net/..."
+  "imageUrl": "https://<your_supabase_url>/storage/v1/object/public/product-images/..."
 }
 
 > No Insomnia: selecione Multipart Form. O campo foto deve ser do tipo File.

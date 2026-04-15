@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { ensureAzureResources } from "./config/azure";
 import produtosRouter from "./routes/produtos";
 import clientesRouter from "./routes/clientes";
 import pedidosRouter from "./routes/pedidos";
@@ -20,6 +19,4 @@ app.use("/api/pedidos", pedidosRouter);
 
 app.get("/", (_, res) => res.json({ status: "ok" }));
 
-ensureAzureResources().then(() => {
-  app.listen(PORT, () => console.log(`Backend rodando em http://localhost:${PORT}`));
-});
+app.listen(PORT, () => console.log(`Backend rodando em http://localhost:${PORT}`));
